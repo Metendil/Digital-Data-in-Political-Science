@@ -1,0 +1,250 @@
+# Week 2
+
+Loading necessary packages.
+
+```{r}
+#| warning: false 
+#| message: false
+
+library(lubridate)
+library(janitor)
+library(knitr)
+library(kableExtra)
+library(scales)
+library(dplyr)
+library(haven)
+library(stringr)
+library(tidyverse)
+```
+
+## Task 1
+
+```{r}
+load("grand_chamber_texts.RData")
+```
+
+## Task 2
+
+```{r}
+grand_chamber_texts <- grand_chamber_texts %>%
+  mutate(itemid = sub("http://hudoc.echr.coe.int/eng\\?i=", "", url))
+```
+
+## Task 3
+
+```{r}
+load("case_details.RData")
+```
+
+## Task 4
+
+```{r}
+case_details <- janitor::clean_names(case_details)
+names(case_details)
+```
+
+## Task 5
+
+```{r}
+case_details <- case_details %>%
+  mutate_all(~ stringr::str_squish(str_trim(.)))
+```
+
+## Task 6
+
+To verify that the merged data has the expected number of rows, I first checked the number of rows in both case_details and grand_chamber_texts. I then performed the inner join on the itemid column since it uniquely identifies each judgment. Then I checked the number of rows in the resulting merged_dataset. The number of rows in should be less than or equal to the number of rows in both of the original datasets, because an inner join only keeps records with matching item IDs. By printing out the number of rows, I observed that merged_dataset has 511 rows, the same as grand_chamber_texts, and less than case-details, indicating that only the common rows that exist in both datasets were kept,.
+
+```{r}
+merged_dataset <- inner_join(case_details, grand_chamber_texts, by = "itemid")
+
+nrow(merged_dataset)
+nrow(case_details)
+nrow(grand_chamber_texts)
+```
+
+## Task 7
+
+The bar chart in Figure @fig-countries shows how many times each country has been a respondent in a Grand Chamber case. The data reveals significant variation with some countries appearing more frequently than others in important cases. This visualization provides a clear and informative overview of the distribution of cases by respondent state.
+
+```{r}
+#| fig-width: 12
+#| fig-height: 5 
+#| label: fig-countries
+#| fig-cap: "Count of Grand Chamber Cases by Respondent State."
+
+country_counts <- merged_dataset %>%
+  separate_rows(respondent_state_s, sep = ",") %>%
+  group_by(respondent_state_s) %>%
+  summarise(value = n()) %>%
+  arrange(desc(value)) %>%
+  mutate(value = if_else(str_detect(respondent_state_s,
+"Cyprus|Türkiye|Moldova|Russia|Bosnia and Herzegovina|Croatia|North Macedonia|Serbia|Slovenia"), 
+              value + 1, value))
+
+country_counts <- country_counts[-c(34,39,40,41),]
+
+ggplot(country_counts, aes(x = reorder(respondent_state_s, -value), y = value)) +
+  geom_bar(stat = "identity", fill = "#0073C2FF", color = "white") +
+  labs(x = "Respondent State",
+       y = "Number of Cases",
+       caption = "Data from the Grand Chamber judgments from the European Court of Human Rights") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.minor = element_blank())
+
+```
+
+## Task 8
+
+I used the package called lubridate.
+
+```{r}
+merged_dataset$judgment_date <- as.character(merged_dataset$judgment_date)
+merged_dataset$date <- dmy(merged_dataset$judgment_date)
+merged_dataset$judgment_year <- as.character(year(merged_dataset$date))
+```
+
+## Task 9
+
+```{r}
+#| fig-width: 12
+#| fig-height: 5 
+#| label: fig-appreciation
+#| fig-cap: "Figure: Trends in mentions of the 'margin of appreciation' over time, highlighting the year 2012."
+
+merged_dataset <- merged_dataset %>%
+  mutate(margin_of_appreciation_count = 
+           str_count(judgment_text, fixed("margin of appreciation")),
+         judgment_year = as.numeric(judgment_year))
+
+
+ggplot(data = merged_dataset,
+       aes(x = judgment_year, y = margin_of_appreciation_count)) +
+  geom_point(color = "#0073C2FF", size = 2) +
+  geom_vline(xintercept = 2012, color = "black")+
+  geom_smooth(method = "loess",
+              linetype = "dashed",
+              size = 2,
+              color = "black")+
+  labs(title = "References to the 'Margin of Appreciation' Doctrine in Grand Chamber Judgments",
+       x = "\nJudgment Year",
+       y = "Count of 'Margin of Appreciation' References") +
+  theme_minimal()
+```
+
+@fig-appreciation counts the number of times "margin of appreciation” is mentioned in each judgment_text. If the European Court has become more deferential towards (some) member states over the last decade or so, I expect this number to go up. This is excactly what I see, but the increase is not visible until the late 2010s.
+
+## Task 10
+
+Based on the feedback, I slightly modified the code on line so that the start_marker string, is just "composed". This seemeed to do the trick, and the answer in task 11 should now be correct.
+
+```{r}
+extract_judges <- function(text) {
+  start_marker <- "composed"
+  end_marker <- "deliberated|the following judgment"
+  pattern <- paste0("(?s)", start_marker, "(.*?)", end_marker)
+  judges_section <- str_extract(text, pattern)
+  if (is.na(judges_section)) return(NA)
+  judges_section <- str_remove(judges_section, start_marker)
+  judges_section <- str_remove(judges_section, end_marker)
+  judges <- str_split(judges_section, "[,\\n]+")[[1]]
+  judges <- str_trim(judges)
+  judges <- judges[
+    judges != "" & !grepl("registrar|president|President|ad hoc judge|Having|judges|jurisconsult|of:|appointed to sit in respect of Lithuania", judges, ignore.case = TRUE)]
+  return(judges)}
+
+judge_list <- merged_dataset %>%
+  rowwise() %>% 
+  mutate(judges = list(extract_judges(judgment_text))) %>%
+  select(itemid, judgment_year, judges) %>%
+  unnest(judges) %>% 
+  filter(!grepl("and ", judges))
+
+judge_summary <- judge_list %>%
+  group_by(itemid, judgment_year) %>%
+  summarise(num_judges = n())
+
+print(judge_summary, n = 10)
+```
+
+## Task 11
+
+```{r}
+#| tbl-cap: Top 10 Judges by Number of Cases in the The European Court of Human Rights
+#| label: tbl-judges
+
+table_data <- judge_list %>% 
+  group_by(judges) %>% 
+  summarise(count = n()) %>% 
+  drop_na() %>% 
+  arrange(desc(count)) %>%
+  head(10)
+
+table <- tibble(
+  `Judge` = table_data$judges,
+  `Number of cases` = table_data$count)
+
+table %>% 
+  tinytable::tt() 
+```
+
+## Task 12
+
+```{r}
+task_12_data <- case_details %>% 
+  select(itemid, conclusion_s) %>% 
+  unique() 
+
+extract_first_number <- function(text) {
+  numbers <- str_extract_all(text, "\\d+")
+  flat_numbers <- unlist(numbers)
+  first_number <- if (length(flat_numbers) > 0) as.numeric(flat_numbers[1]) else NA
+  return(first_number)}
+
+task_12_data$article <- sapply(task_12_data$conclusion_s, extract_first_number)
+
+task_12_data <- task_12_data %>% 
+  filter(!str_detect(conclusion_s, "^Violation of P") & 
+           !str_detect(conclusion_s, "^No violation of P")) %>%
+  mutate(violated = str_starts(conclusion_s, "Violation"),
+         not_violated = str_starts(conclusion_s, "No violation")) %>% 
+  filter(violated == TRUE | not_violated == TRUE)
+
+table_data <- task_12_data %>% 
+  group_by(article) %>% 
+  filter(violated == FALSE) %>% 
+  summarise(count = n()) %>% 
+  drop_na() %>% 
+  arrange(desc(count)) %>%
+  head(10)
+
+table <- tibble(
+  `Article` = table_data$article,
+  `Number of non-violations` = table_data$count) %>% 
+  tinytable::tt() 
+
+table_data2 <- task_12_data %>% 
+  group_by(article) %>% 
+  filter(violated == TRUE) %>% 
+  summarise(count = n()) %>% 
+  drop_na() %>% 
+  arrange(desc(count)) %>%
+  head(10)
+
+table2 <- tibble(
+  `Article` = table_data2$article,
+  `Number of violations` = table_data2$count) %>% 
+  tinytable::tt() 
+
+```
+
+```{r}
+#| tbl-cap: Top 10 most and least violated articles in The European Court of Human RightsS
+#| layout-ncol: 2
+
+table
+
+table2
+```
+
+

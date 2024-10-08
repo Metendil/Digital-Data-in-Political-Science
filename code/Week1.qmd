@@ -1,0 +1,253 @@
+# Week 1
+
+Loading necessary packages.
+
+```{r}
+#| warning: false 
+#| message: false
+
+library(scales)
+library(dplyr)
+library(haven)
+library(tidyverse)
+library(tinytable)
+library(gt)
+```
+
+## Task 1
+
+Loading dataset.
+
+```{r}
+#| warning: FALSE 
+#| message: FALSE 
+
+name_mapping <- list(
+  "merged_r3_data" = "data_round_3",
+  "merged_r4_data" = "data_round_4",
+  "merged-round-5-data-34-countries-2011-2013-last-update-july-2015_0" = 
+    "data_round_5",
+  "merged_r6_data_2016_36countries2" = "data_round_6",
+  "r7_merged_data_34ctry.release" = "data_round_7"
+)
+
+files <- list.files(pattern = "*.sav*")
+
+for (i in 1:length(files)) {
+   file_name <- files[i]
+   data_name <- sub("*.sav*", "", files[i])
+   temp_data <- read_sav(file_name, encoding = "latin1")
+   if (data_name %in% names(name_mapping)) {
+     assign(name_mapping[[data_name]], temp_data, envir = .GlobalEnv)} 
+   else {
+     warning(paste("No mapping found for", data_name))}
+   }
+```
+
+## Task 2
+
+Renaming variables.
+
+```{r}
+data_round_3 <- data_round_3 %>% 
+  rename(horizontal_judicial_power = q41,
+         close_to_party = q86)
+
+data_round_4 <- data_round_4 %>% 
+  rename(horizontal_judicial_power = Q37,
+         close_to_party = Q86)
+
+data_round_5 <- data_round_5 %>% 
+  rename(horizontal_judicial_power = Q40,
+         close_to_party = Q89B)
+
+data_round_6 <- data_round_6 %>% 
+  rename(horizontal_judicial_power = Q38,
+         close_to_party = Q90B)
+
+data_round_7 <- data_round_7 %>% 
+  rename(horizontal_judicial_power = Q33, 
+         close_to_party = Q88B )
+```
+
+## Task 3
+
+Filtering out Ghana-observations. Selecting only two variables, and creating a new one.
+
+```{r}
+data_round_3 <- data_round_3 %>% 
+  filter(country == 4) %>%
+  select(horizontal_judicial_power, close_to_party) %>% 
+  mutate(horizontal_judicial_power = as.numeric(horizontal_judicial_power),
+         close_to_party = as.numeric(close_to_party)) %>% 
+  mutate(round = 3)
+
+data_round_4 <- data_round_4 %>% 
+  filter(COUNTRY == 5) %>% 
+  select(horizontal_judicial_power, close_to_party) %>% 
+  mutate(horizontal_judicial_power = as.numeric(horizontal_judicial_power),
+         close_to_party = as.numeric (close_to_party)) %>% 
+  mutate(round = 4)
+
+
+data_round_5 <- data_round_5 %>% 
+  filter(COUNTRY_ALPHA == 11) %>% 
+  select(horizontal_judicial_power, close_to_party) %>% 
+  mutate(horizontal_judicial_power = as.numeric(horizontal_judicial_power),
+         close_to_party = as.numeric(close_to_party)) %>% 
+  mutate(round = 5)
+
+
+data_round_6 <- data_round_6 %>% 
+  filter(COUNTRY == 11) %>% 
+  select(horizontal_judicial_power, close_to_party) %>% 
+  mutate(horizontal_judicial_power = as.numeric(horizontal_judicial_power),
+         close_to_party = as.numeric(close_to_party)) %>% 
+  mutate(round = 6)
+
+
+data_round_7 <- data_round_7 %>% 
+  filter(COUNTRY == 10) %>% 
+  select(horizontal_judicial_power, close_to_party) %>% 
+  mutate(horizontal_judicial_power = as.numeric(horizontal_judicial_power),
+         close_to_party = as.numeric(close_to_party)) %>% 
+  mutate(round = 7)
+
+
+data_round_3_7 <- rbind(data_round_3, data_round_4, data_round_5,
+                        data_round_6, data_round_7)
+
+```
+
+## Task 4
+
+Datawrangling.
+
+```{r}
+data_round_3_7 <- data_round_3_7 %>%
+  mutate(party_supporters = case_when(
+    round == 3 & close_to_party == 181 ~ "NDC supporters",
+    round == 3 & close_to_party == 182 ~ "NPP supporters",
+    round >= 4 & round <= 7 & close_to_party == 261 ~ "NDC supporters",
+    round >= 4 & round <= 7 & close_to_party == 262 ~ "NPP supporters")) %>%
+  mutate(year = case_when(
+    round == 3 ~ 2005,
+    round == 4 ~ 2008,
+    round == 5 ~ 2012,
+    round == 6 ~ 2014,
+    round == 7 ~ 2017)) %>% 
+  mutate(partisan = case_when(
+      (party_supporters == "NDC supporters" & 
+         year %in% c(2005, 2008, 2017)) |
+      (party_supporters == "NPP supporters" & 
+         year %in% c(2012, 2014)) ~ "Out-partisan",
+      (party_supporters == "NPP supporters" & 
+         year %in% c(2005, 2008, 2017)) |
+      (party_supporters == "NDC supporters" & 
+         year %in% c(2012, 2014)) ~ "Co-partisan")) %>% 
+  mutate(horizontal_judicial_power_binary = case_when(
+      horizontal_judicial_power %in% c(3, 4) ~ 1,
+      horizontal_judicial_power %in% c(1, 2, 5) ~ 0))
+```
+
+## Task 5
+
+```{r}
+mean_data_round_3_7 <- data_round_3_7 %>%
+  group_by(party_supporters, year) %>%
+  summarize(avarage = mean(horizontal_judicial_power_binary, na.rm = TRUE)) %>%
+  drop_na()
+
+mean_data_round_3_7 %>% 
+  mutate(avarage = avarage*100) %>% 
+  gt() %>%
+  cols_label(avarage = "Percentage avarage",
+             year = "Year") %>% 
+  fmt_number(decimals = 0, use_seps = FALSE) %>% 
+  tab_header(title = md("Public views on judicial power in Ghana, by year and party loyalty"),
+               subtitle = md("Percentage of positive responses to the statement: *The President must always obey the laws and the courts, even if he thinks they are wrong.*"))
+```
+
+
+## Task 6
+
+```{r Figur1}
+#| warning: false
+#| message: false
+#| fig-width: 8 
+#| fig-height: 4 
+#| label: fig-judicial
+#| fig-cap: "Does Public Support for Judicial Power Depend on Who Is in Political Power? Testing a Theory of Partisan Alignment in Africa. American Political Science Review 114 (1): 144–63."
+
+label1 <- c("Out-partisan","Out-partisan",
+            "Co-partisan","Co-partisan", "Out-partisan",
+            "Co-partisan","Co-partisan",
+            "Out-partisan","Out-partisan","Co-partisan")
+ 
+mean_data_round_3_7 <- data.frame(mean_data_round_3_7, label1)
+
+ggplot(data = mean_data_round_3_7 %>% 
+         drop_na(),
+       aes(x = year, y =  avarage,
+           shape = party_supporters, linetype = party_supporters)) +
+  geom_line() +
+  geom_point() +
+  geom_vline(xintercept = 2008.25,
+            linetype = "dashed",
+             alpha = 0.8)+
+  geom_vline(xintercept = 2016.25,
+             linetype = "dashed",
+             alpha = 0.8)+
+  geom_text(label = label1,
+            nudge_y = 0.01,
+            size = 4,
+            check_overlap = TRUE)+
+  scale_linetype_manual(values=c(4,2)) +  
+  scale_shape_manual(values = c(24,16))+
+  scale_x_continuous(limits = c(2004, 2019),
+                     breaks = seq(2004,2019, by = 1))+
+  scale_y_continuous(limits = c(0.55, 0.85),
+                     breaks = seq(0.55,0.85, by = 0.05))+
+  labs(y = "Proportion that Support Horizontal Power\n",
+       x = "\nYear")+
+  theme_classic()+
+  theme(legend.position = c(0.094, 0.094))+
+  theme(legend.background = element_rect(
+    size=0.5, color = "black",linetype="solid"))+
+  guides(shape = guide_legend(title = NULL),
+         linetype = guide_legend(title = NULL)) +
+  annotate("text", label = "NPP president", x = 2006, y = 0.85)+
+  annotate("text", label = "NDC president", x = 2012, y = 0.85)+
+  annotate("text", label = "NPP president", x = 2018, y = 0.85)
+```
+
+## Task 7
+
+@fig-judicial replicates the figure from the article "Does Public Support for Judicial Power Depend on Who Is in Political Power? [@bartels2020does].
+
+## Task 8
+
+```{r}
+#| tbl-cap: Presidential Turnover and the Afrobarometer Surveys in Ghana
+#| label: tbl-turnover
+
+year_of_survey <- c("Round 1", "Round 2", "Round 3", "Round 4",
+                    "Round 5", "Round 6", "Round 7")
+
+year <- c(1999, 2002, 2005, 2008,
+          2012, 2014, 2017)
+
+president <- c("Jerry Rawlings", "John Kufuor", "John Kufuor", "John Kufuor", 
+               "John Atta Mills", "John Mahama*", "Nana Akufo-Addo")
+
+president_party <- c("NDC", "NPP", "NPP", "NPP", 
+                     "NDC", "NDC", "NPP")
+
+table <- tibble(
+  ` ` = year_of_survey,
+  `Year of survey` = year,
+  `President` = president,
+  `President party` = president_party) %>% 
+  tinytable::tt(notes = "Note: NDC =  National Democratic Congress; NPP = New Patriotic Party.*President Atta Mills passed away in July 2012. The survey was conducted in May 2012. Vice President John Mahama assumed the presidency and was the NDC candidate in the December 2012 election.") 
+table
+```

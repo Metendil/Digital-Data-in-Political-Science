@@ -1,0 +1,326 @@
+# Week 5
+
+Loading necessary packages.
+
+```{r}
+#| warning: false 
+#| message: false
+
+library(sf)
+library(readxl)
+library(rvest)
+library(knitr)
+library(kableExtra)
+library(scales)
+library(dplyr)
+library(haven)
+library(stringr)
+library(tidyverse)
+```
+
+## Task 1
+
+```{r}
+#| warning: false 
+#| message: false
+
+scad <- read_csv("SCAD2018Africa_Final.csv")
+zems  <- read_dta("zems.dta")
+constituencies <- st_read("constituencies2016.shp") %>% 
+         mutate(pr_2016 = as.factor(pr_2016))
+```
+## Task 2
+
+```{r}
+#| fig-width: 12
+#| fig-height: 10 
+#| label: fig-zambia
+#| fig-cap: "Constituencies and provinces in Zambia"
+
+ggplot(data = constituencies %>% 
+         mutate(pr_2016 = str_to_title(pr_2016))) + 
+     geom_sf(aes(fill = pr_2016))+
+  scale_fill_discrete(name = "Provinces")+
+  theme_minimal()+
+  theme(legend.text = element_text(size = 16),
+        legend.title = element_text(size = 20),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
+## Task 3
+
+```{r}
+constituencies <- constituencies %>%
+  mutate(cnsttnc = ifelse(cnsttnc == "mapatizya", "Zimba", cnsttnc))
+
+constituencies$cnsttnc <- str_to_title(constituencies$cnsttnc)
+
+unique_cnsttnc <- unique(constituencies$cnsttnc)
+unique_CNAME <- unique(zems$CNAME)
+mismatches <- unique_CNAME[!unique_CNAME %in% unique_cnsttnc]
+print(mismatches)
+
+
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Itezhi Tezhi"] <- "Itezhitezhi"
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Mufulira"] <- "Mufilira"
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Mwembeshi"] <- "Mwembezhi"
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Isoka West"] <- "Isoka"
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Mpika Central"] <- "Mpika"
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Shiwangandu"] <- "Shiwan'gandu"
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Ikelengi"] <- "Ikeleng'i"
+constituencies$cnsttnc[constituencies$cnsttnc == 
+                         "Mwinilunga East"] <- "Mwinilunga"
+
+
+final_unique_cnsttnc <- unique(constituencies$cnsttnc)
+final_mismatches <- 
+  final_unique_cnsttnc[!final_unique_cnsttnc %in% unique_CNAME]
+print(final_mismatches)
+```
+
+## Task 4
+
+I join zems to constituencies using left_join(), which is a regular join, because I have done this before, and therefore can make sure that it is done correctly.
+
+```{r}
+zems <- zems %>% 
+  rename(cnsttnc = CNAME)
+constituencies <- constituencies %>% 
+  left_join(zems, by = "cnsttnc")
+```
+
+## Task 5
+
+```{r}
+constituencies <- constituencies %>%
+  mutate(electoral_violence = case_when(
+    preelection_violence == 1 &
+      postelection_violence == 0 ~ "Pre-election violence",
+    preelection_violence == 0 &
+      postelection_violence == 1 ~ "Post-election violence",
+    preelection_violence == 1 & 
+      postelection_violence == 1 ~ "Pre- and post-election violence",
+    TRUE ~ "No reported violence"))
+```
+
+## Task 6
+
+The figure tells us that violence, especially post-election violence, was mostly concentrated in the south-eastern corner of Zambia.
+
+```{r}
+#| fig-width: 12
+#| fig-height: 10 
+#| label: fig-violence
+#| fig-cap: "Electoral violence in Zambia"
+
+colors <- c("Pre- and post-election violence" = "#b2182b",
+                 "Pre-election violence" = "#fddbc7",
+                 "Post-election violence" = "pink",
+                 "No reported violence" = "white")
+
+ggplot(data = constituencies %>% 
+         mutate(pr_2016 = str_to_title(pr_2016))) + 
+     geom_sf(aes(fill = electoral_violence))+
+    scale_fill_manual(values = colors,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  theme_minimal()+
+  theme(legend.text = element_text(size = 16),
+        legend.title = element_text(size = 20),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+
+```
+
+## Task 7
+
+```{r}
+scad_filtered <- scad %>% 
+  filter(countryname == "Zambia") %>% 
+  filter(styr == 2016) %>% 
+  mutate(electoral_violence_event = case_when(
+    id %in% c(143,145,151) ~ 0, 
+    id %in% c(144,146,147,148,149,150,152) ~ 1))
+```
+
+```{r}
+#| tbl-cap: Violence events in Zambia during 2016
+#| label: tbl-electoral
+
+table <- tibble(
+  `ID` = scad_filtered$id,
+  `Date` = scad_filtered$startdate,
+  `Event description` = scad_filtered$issuenote)
+
+table %>% 
+  tinytable::tt(width = 2) 
+```
+
+## Task 8
+
+```{r}
+scad_filtered <- scad_filtered %>%
+  st_as_sf(coords = c("longitude", "latitude"), 
+           crs = 4326)
+```
+
+## Task 9
+
+```{r}
+#| fig-width: 12
+#| fig-height: 10 
+#| label: fig-electionpoints
+#| fig-cap: "Electoral violence in Zambia, 2016"
+
+colors <- c("Pre- and post-election violence" = "#b2182b",
+                 "Pre-election violence" = "#fddbc7",
+                 "Post-election violence" = "pink",
+                 "No reported violence" = "white")
+
+ggplot(data = constituencies %>% 
+         mutate(pr_2016 = str_to_title(pr_2016))) + 
+  geom_sf(aes(fill = electoral_violence))+
+  geom_sf(data = st_jitter(scad_filtered %>% 
+                             filter(electoral_violence_event == 1),
+                           factor = 0.04), alpha = 0.5, size = 7) +
+  scale_fill_manual(values = colors,
+                     na.value = "gray40",
+                    labs(label = ""))+
+  theme_minimal()+
+  theme(legend.text = element_text(size = 16),
+        legend.title = element_text(size = 20),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())
+```
+
+## Task 10
+
+```{r}
+scad_points <- scad_filtered %>% 
+  select(elocal) %>% 
+  filter(elocal != "Nationwide")
+
+scad_points <- st_transform(scad_points, st_crs(constituencies))
+joined_data <- st_join(scad_points, constituencies, join = st_within)
+
+counts <- joined_data %>%
+  group_by(pr_2016) %>%
+  summarise(violence_count = n()) %>%
+  as.data.frame() %>% 
+  mutate(pr_2016 = as.character(pr_2016)) %>% 
+  select(pr_2016, violence_count)
+  
+constituencies <- constituencies %>% 
+  left_join(counts, by = "pr_2016")
+
+constituencies[is.na(constituencies)] <- 0
+```
+
+## Task 11
+
+The results are not consistent for the variable "Nightlight", which predicts violence outcomes using the SCAD dataset, but not using the ZEMS dataset. The results are, on the other hand, consistent for population and competition.  The ZEMS violence are based on more observations of election-related-violence - 83 -  compared to the the SCAD dataset's meager 54 values. Violence is measured differently in the two models, the ZEMS violence notably include a lot more incidents of pre-election violence. Overall, I do trust model 2 based on the ZEMS dataset more. It includes more violence events that occur before the election, making it more robust.
+
+```{r}
+constituencies_task_11 <- constituencies %>% 
+  mutate(scad_violence = case_when(violence_count >= 1 ~ 1,
+                                   violence_count == 0 ~ 0),
+         zems_violence = case_when(
+    electoral_violence != "No reported violence" ~ 1,
+    electoral_violence == "No reported violence" ~ 0)) %>% 
+  as.data.frame()
+
+constituencies_task_11 %>% 
+  count(zems_violence)
+
+constituencies_task_11 %>% 
+  count(scad_violence)
+```
+
+```{r}
+#| tbl-cap: Results from regression analysis
+#| label: tbl-regression
+
+model1 <- glm(
+  scad_violence ~ log(PopulationDensity) + 
+    Nightlightlog + Competition, 
+  data = constituencies_task_11, 
+  family=binomial(link="logit"))
+
+model2 <- glm(
+  zems_violence ~ log(PopulationDensity) + 
+    Nightlightlog + Competition, 
+  data = constituencies_task_11, 
+  family=binomial(link="logit"))
+
+vcov_model1 <- sandwich::vcovCL(model1)
+vcov_model2 <- sandwich::vcovCL(model2)
+
+modelsummary::modelsummary(
+  list("Model 1 (SCAD)" = model1,
+       "Model 2 (ZEMS)" = model2),
+  vcov = list(model1 = vcov_model1,
+              model2 = vcov_model2),
+  cluster = "pr_2016",
+  gof_map = c("nobs"),
+  fmt = 2)
+
+```
+
+I was informed in the feedback on this task, that the intercept for the scad model should be -4.789 with SE 1.102, and 0.466 with 0.339 SE for the zems model. My zems model seems to be correct. My scad model, however, does not line up with what the feedback says. I have tried my best to find the reason why this is the case, but I have come up short. I did not receive any feedback or comment on the previous steps of datawrangling. This makes me unsure of whether the discrepancy between my scad model and the feedback is due to a coding error I have failed to discover, or a different reason.
+
+## Task 12
+
+Based on this graph, I say that the relationship between electoral competition and electoral violence in Zambia is negative. Greater electoral competition is associated with less electoral violence.
+
+```{r}
+#| fig-width: 6
+#| fig-height: 5 
+#| label: fig-relationship
+#| fig-cap: "Violence and electoral competition in Zambia"
+
+scenarios <- cbind(
+  1,
+  median(constituencies_task_11$PopulationDensity, na.rm = TRUE),
+  median(constituencies_task_11$Nightlightlog, na.rm = TRUE),
+  seq(min(constituencies_task_11$Competition, na.rm = TRUE),
+      max(constituencies_task_11$Competition, na.rm = TRUE),
+      length.out = 20))
+      
+sim_betas <- MASS::mvrnorm(
+  n = 1000,
+  mu = coefficients(model2), 
+  Sigma = sandwich::vcovCL(model2, cluster = constituencies_task_11$pr_2016)) 
+
+sim_linear_predictors <- sim_betas %*% t(scenarios) 
+
+sim_predicted_probabilities <- pnorm(sim_linear_predictors)
+
+plot_values <- apply(sim_predicted_probabilities, 
+                            MARGIN = 2, 
+                            FUN = quantile, 
+                            probs = c(.025,.5,.975))
+
+plot_values <- plot_values%>% 
+  t() %>% 
+  as.data.frame() %>% 
+  mutate(Competition = as.vector(scenarios[,4]))
+
+ggplot(plot_values, 
+  aes(x = Competition, 
+           y = `50%`, 
+           ymin = `2.5%`, 
+           ymax = `97.5%`)) +
+  geom_ribbon(alpha = 0.2)+
+  geom_line(linewidth = 1)+
+  theme_classic()+
+    labs(y = "Predicted probability of violence\n", 
+      x = "\nElectoral competition")
+```

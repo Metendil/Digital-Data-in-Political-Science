@@ -1,0 +1,369 @@
+# Week 4
+
+Loading necessary packages.
+
+```{r}
+#| warning: false 
+#| message: false
+
+library(rjson)
+library(jsonlite)
+library(readxl)
+library(rvest)
+library(knitr)
+library(kableExtra)
+library(scales)
+library(dplyr)
+library(haven)
+library(stringr)
+library(tidyverse)
+library(PxWebApiData)
+
+```
+
+## Task 1
+
+```{r}
+#| eval: FALSE
+
+if (!requireNamespace("PxWebApiData", quietly = TRUE)) {
+  install.packages("PxWebApiData")}
+
+library(PxWebApiData)
+```
+
+## Task 2
+
+The number of the table about “Election campaign contributions” to different Norwegian political parties is 10198. The election years 2013, 2015, 2017, 2019, 2021 and 2023 are included. For more information, please go to Statistics Norway.[^1]
+
+[^1]: https://www.ssb.no/en/statbank/table/10198
+
+## Task 3
+
+```{r, results='hide'}
+#| cache: true
+
+ApiData("https://data.ssb.no/api/v0/en/table/10198",  returnMetaFrames = FALSE)
+
+party_contributions <- ApiData12(
+  "https://data.ssb.no/api/v0/en/table/10198",
+  PolitPartiLag = c(
+    "9010000", "9020000", "9030000","9040000", "9050000",
+    "9060000", "9070000", "9080000", "9130000"),
+  ContentsCode = c(
+    "BidragIalt","Privatpersoner","OrganisasjonArbLiv",
+    "BidragKommersielle","BidragAndre"),
+  Tid = c("2013","2015","2017","2019","2021","2023")) %>% 
+  select(cols = c(1:4,7)) %>% 
+  mutate(cols1 = recode(
+    cols1,
+    "Christian Democratic party, total" = "KrF",
+    "Liberal Party, total" = "Venstre",
+    "Socialist Left Party, total" = "SV",
+    "Labour Party, total" = "Ap",
+    "Progress Party, total" = "Frp",
+    "Conservative Party, total" = "Høyre",
+    "Centre Party, total" = "Sp",
+    "Red Party, total" = "Rødt",
+    "Green Party, total" = "MDG"))
+    
+colnames(party_contributions) <- c(
+  "party","contribution_type","year", "party_code","value")
+
+writexl::write_xlsx(party_contributions,
+                    "party_contributions.xlsx")
+```
+
+## Task 4
+
+```{r}
+party_contributions <- read_excel("party_contributions.xlsx") %>% 
+  mutate(year = as.numeric(year))
+```
+
+## Task 5
+
+@fig-donations shows donations to the Norwegian political parties over time.
+
+```{r}
+#| fig-width: 10
+#| fig-height: 8
+#| label: fig-donations
+#| fig-cap: "Trends in donations to Norwegian political parties"
+
+party_colors <- c(
+  "Høyre" = "#1E90FF", 
+  "Ap" = "#FF0000",  
+  "Sp" = "#006400",
+  "Frp" = "#87CEEB",  
+  "SV" = "#FF69B4",
+  "Venstre" = "#32CD32",
+  "KrF" = "#FFD700", 
+  "MDG" = "#2E8B57")
+
+task4_data <- party_contributions %>%
+  filter(contribution_type == "Total contributions")
+
+ggplot(
+  data = task4_data,
+  aes(x = year, y = value, color = party)) +
+  geom_line(size = 1) +
+  scale_x_continuous(limits = c(2013, 2023),
+                     breaks = seq(2013, 2023, by = 2))+
+  scale_color_manual(values = party_colors,
+                     na.value = "gray40",
+                     labs(label = "Party"))+
+  scale_y_continuous(labels = scales::number_format(suffix = " kr"))+
+  labs(title = "Donations to Norwegian political parties",
+       x = "Election year",
+       y = "Total donations\n",
+       color = "Party") +
+  theme_minimal() +
+  theme(legend.position = "right", 
+        strip.text = element_text(size = 14),
+        axis.title = element_text(size = 25),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 16),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 15),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(20,0,20,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 20,
+                                     margin=margin(10,0,10,0)),
+        plot.caption = element_text(hjust = 1))
+```
+
+## Task 6
+
+@fig-blockdonations shows donations to the Norwegian political blocks over time.
+
+```{r}
+#| fig-width: 10
+#| fig-height: 12
+#| label: fig-blockdonations
+#| fig-cap: "Trends in donations to Norwegian political blocks"
+
+party_colors <- c(
+  "Right-wing block" = "#1E90FF", 
+  "Left-wing block" = "#FF0000")
+
+total_contributions_blocks <- party_contributions %>%
+  filter(contribution_type == "Total contributions") %>% 
+  mutate(block = case_when(
+    party %in% c("KrF", "Venstre","Høyre","Frp") ~ "Right-wing block",
+    party %in% c("Rødt","SV","Ap","Sp") ~ "Left-wing block")) %>%
+    group_by(block, year) %>%
+    summarise(value = sum(value, na.rm = TRUE)) %>% 
+  drop_na()
+
+print(total_contributions_blocks)
+
+types_contributions_blocks <- party_contributions %>%
+  mutate(contribution_type = str_replace(contribution_type, "Contributions from (.)", function(match) {
+      paste0(toupper(substr(match, 20, 20)), substr(match, 21, nchar(match)))}),
+    block = case_when(
+      party %in% c("KrF", "Venstre", "Høyre", "Frp") ~ "Right-wing block",
+      party %in% c("Rødt", "SV", "Ap", "Sp") ~ "Left-wing block")) %>%
+  group_by(block, year, contribution_type) %>%
+  summarise(value = sum(value, na.rm = TRUE), .groups = 'drop') %>% 
+  drop_na()
+
+plot <- ggplot(
+  data = types_contributions_blocks,
+  aes(x = year, y = value, color = block)) +
+  geom_line(size = 1) +
+  scale_x_continuous(limits = c(2013, 2023),
+                     breaks = seq(2013, 2023, by = 2))+
+  scale_color_manual(values = party_colors,
+                     na.value = "gray40",
+                     labs(label = "Party"))+
+  scale_y_continuous(labels = scales::number_format(suffix = " kr"))+
+  facet_wrap(~contribution_type, scales = "free",  ncol = 2)+
+  labs(title = "Donations to the political blocks from donors",
+       x = "\nElection year",
+       y = "Total donations\n",
+       color = "Party") +
+  theme_minimal() +
+  theme(legend.position = "top", 
+        strip.text = element_text(size = 14),
+        axis.title = element_text(size = 25),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 16),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 15),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(20,0,20,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 20,
+                                     margin=margin(10,0,10,0)),
+        plot.caption = element_text(hjust = 1))
+
+plot
+```
+
+## Task 7
+
+```{r}
+#| eval: FALSE
+
+subjects <- read_json("https://data.uio.no/studies/v1/courses")
+subjects <- toJSON(subjects, pretty = TRUE)
+write(subjects, file = "subjects_data.json")
+```
+
+## Task 8
+
+```{r}
+json_data <- as.data.frame(fromJSON("subjects_data.json")) %>% 
+  select(courses.code, courses.name, courses.url)
+```
+
+## Task 9
+
+```{r}
+task_9_data <- json_data %>% 
+  filter(grepl("STV", courses.code)) %>% 
+  mutate(level = case_when(
+    substr(courses.code, 4, 4) == "1" ~ "Introductory BA",
+    substr(courses.code, 4, 4) %in% c("2", "3") ~ "Advanced BA",
+    substr(courses.code, 4, 4) == "4" ~ "MA",
+    substr(courses.code, 4, 4) == "9" ~ "PhD"),
+  subfield = case_when(
+    substr(courses.code, 5, 5) == "0" ~ "Methods",
+    substr(courses.code, 5, 5) == "1" ~ "Political theory",
+    substr(courses.code, 5, 5) == "2" ~ "International relations",
+    substr(courses.code, 5, 5) == "3" ~ "Comparative politics",
+    substr(courses.code, 5, 5) %in% c("4", "8") ~ "Public administration",
+    substr(courses.code, 5, 5) == "5" ~ "Cross-cutting",
+    substr(courses.code, 5, 5) %in% c("6", "9") ~  "MA Thesis"))
+```
+
+## Task 10
+
+```{r}
+#| eval: FALSE
+
+# Check if the directory "semesters" exists; if not, create it
+if (!dir.exists("semesters")) {
+  dir.create("semesters")}
+
+# Define a function to extract the last two digits of a year
+get_last_two_digits <- function(year) {return(substr(year, 3, 4))}
+
+years <- 2004:2024 # Create a sequence of years from 2004 to 2024
+semesters <- c("v", "h") # Defining semesters: 'v' for spring and 'h' for autumn
+
+for (year in years) {
+  last_two_digits <- get_last_two_digits(year) # Last two digits identifies year
+  for (semester in semesters) { # Loop through semesters for the current year
+    url <- paste0("https://data.uio.no/studies/v1/semester/",
+                  last_two_digits, semester, "/courses")
+    file_name <- file.path("semesters", # Define the file name and path
+                           paste0(year, "_", semester,
+                                  "_courses.json"))
+    if (!file.exists(file_name)) {  # Check if the file already exists
+      tryCatch({ # Download and write the JSON data to a file
+        write_json(fromJSON(url), path = file_name)
+        cat("Downloaded:", file_name, "\n")
+        Sys.sleep(1) # Sleep for 1 second to avoid overloading the server
+      }, error = function(e) { # Print an error message if the download fails
+        cat("Failed to download:", url, "\n")
+      })
+    } else {  # Inform that the file already exists
+      cat("File already exists:", file_name, "\n")
+    }
+  }
+}
+
+```
+
+## Task 11
+
+```{r}
+process_json_file <- function(file) {
+  semester <- sub("^.*/", "", file)
+  semester <- substr(semester, 1, 6)
+  data <- fromJSON(file) %>%
+    as.data.frame() %>%
+    select(courses.code, courses.url)
+  data <- data %>%
+    mutate(semester = semester)
+  return(data)
+  }
+
+json_files <- list.files("semesters", pattern = "\\.json$", full.names = TRUE)
+task_11_data <- do.call(rbind, lapply(json_files, process_json_file))
+```
+
+## Task 12
+
+For some reason, spring semesters in 2013, 2015 and 2016 are unavailable for download. Therefore, I have dropped these years from the figure. From what I can observe, methods classes have exploded in popularity. Comparative politics and political theory are less and less widespread at the Department of Political Science at UiO.
+
+```{r}
+#| fig-width: 12
+#| fig-height: 10 
+#| label: fig-polscience
+#| fig-cap: "Trends in differenc courses offered in the Department of Political Science."
+
+task_12_data <- task_11_data %>%  
+  mutate(level = case_when(
+        substr(courses.code, 4, 4) == "1" ~ "Introductory BA",
+        substr(courses.code, 4, 4) %in% c("2", "3") ~ "Advanced BA",
+        substr(courses.code, 4, 4) == "4" ~ "MA",
+        substr(courses.code, 4, 4) == "9" ~ "PhD"),
+      subfield = case_when(
+        substr(courses.code, 5, 5) == "0" ~ "Methods",
+        substr(courses.code, 5, 5) == "1" ~ "Political theory",
+        substr(courses.code, 5, 5) == "2" ~ "International relations",
+        substr(courses.code, 5, 5) == "3" ~ "Comparative politics",
+        substr(courses.code, 5, 5) %in% c("4", "8") ~ "Public administration",
+        substr(courses.code, 5, 5) == "5" ~ "Cross-cutting",
+        substr(courses.code, 5, 5) %in% c("6", "9") ~ "MA Thesis"),
+      ba_or_ma = case_when(
+        substr(courses.code, 4, 4) %in% c("1", "2", "3") ~ "BA",
+        substr(courses.code, 4, 4) == "4" ~ "MA"),
+      semester = semester,
+      year = as.numeric(substring(semester, 1, 4))) %>% 
+  drop_na()
+  
+course_counts <- task_12_data %>%
+  group_by(year, ba_or_ma, subfield) %>%
+  summarise(course_count = n(), .groups = "drop") %>% 
+  filter(!year %in% c(2013,2015,2016))
+
+ggplot(course_counts, 
+       aes(x = year, y = course_count, 
+           linetype = ba_or_ma)) +
+  geom_line(size = 1.2) +
+  facet_wrap(~subfield, scales = "free")+
+  labs(title = "Trends in different courses over time",
+    x = "Year",
+    y = "Number of courses",
+    color = "Subfield",
+    linetype = "Course Level") +
+  theme_minimal() +
+  theme(legend.position = "top", 
+        strip.text = element_text(size = 18),
+        axis.title = element_text(size = 25),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 16),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 15),
+        legend.key.height = unit(1, 'cm'),
+        panel.grid.minor = element_blank(),
+        plot.title = element_text(hjust = 0.5,
+                                  size = 25,
+                                  margin=margin(20,0,20,0)),
+        plot.subtitle = element_text(hjust = 0.5,
+                                     size = 20,
+                                     margin=margin(10,0,10,0)),
+        plot.caption = element_text(hjust = 1))
+```
+

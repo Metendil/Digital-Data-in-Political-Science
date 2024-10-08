@@ -1,0 +1,260 @@
+# Week 3
+
+Loading necessary packages.
+
+```{r}
+#| warning: false 
+#| message: false
+
+library(lubridate)
+library(zoo)
+library(rvest)
+library(knitr)
+library(kableExtra)
+library(scales)
+library(dplyr)
+library(haven)
+library(stringr)
+library(tidyverse)
+library(readxl)
+```
+
+## Task 1
+
+Save a local copy of the website [https://www.pollofpolls.no/?cmd=Stortinget&do=visallesnittLenker til en ekstern side.](https://www.pollofpolls.no/?cmd=Stortinget&do=visallesnitt) as an `.html` file. Change the execution options for the code chunk that downloads the file so that the file is not downloaded again every time you render your document. This website shows average support for each major political party in Norway based on public opinion polls for each month from 2008.
+
+```{r, eval = !file.exists("poll_of_polls.html")}
+url <- "https://www.pollofpolls.no/?cmd=Stortinget&do=visallesnitt"
+download.file(url, destfile = "poll_of_polls.html")
+```
+
+## Task 2
+
+```{r}
+html <- read_html("poll_of_polls.html")
+
+table <- html %>%
+  html_element("table") %>%
+  html_table()
+
+monthly_averages <- as.data.frame(table)
+names(monthly_averages)=make.names(names(monthly_averages))
+head(monthly_averages)
+```
+
+## Task 3
+
+```{r}
+data <- monthly_averages %>%
+  pivot_longer(cols = c(Ap:Andre),
+               names_to = "party",
+               values_to = "value") %>% 
+  mutate(party = recode(party, "HÃ.yre" = "Høyre", "RÃ.dt" = "Rødt")) %>% 
+  rename(date = X)
+```
+
+## Task 4
+
+```{r}
+data <- data %>% 
+  separate(value, into = c("support", "seats"),
+           sep = " \\(", convert = TRUE) %>% 
+  mutate(seats = as.numeric(gsub("\\)", "", seats)),
+         support = as.numeric(gsub(",", ".", support)))
+```
+
+## Task 5
+
+```{r}
+data <- data %>%
+  mutate(date = gsub("Januar", "January", date),
+         date = gsub("Februar", "January", date),
+         date = gsub("Mars", "March", date),
+         date = gsub("April", "April", date),
+         date = gsub("Mai", "May", date),
+         date = gsub("Juni", "June", date),
+         date = gsub("Juli", "July", date),
+         date = gsub("August", "August", date),
+         date = gsub("September", "September", date),
+         date = gsub("Oktober", "October", date),
+         date = gsub("November", "November", date),
+         date = gsub("Desember", "December", date)) %>% 
+  mutate(date = as.yearmon(date, "%B '%y"))
+```
+
+## Task 6
+
+```{r}
+#| message: false
+#| fig-width: 12
+#| fig-height: 10 
+#| label: fig-parties
+#| fig-cap: "Trends in support for political parties in Norway."
+
+party_colors <- c(
+  "Høyre" = "#1E90FF", 
+  "Ap" = "#FF0000",  
+  "Sp" = "#006400",
+  "Frp" = "#87CEEB",  
+  "SV" = "#FF69B4",
+  "Venstre" = "#32CD32",
+  "KrF" = "#FFD700", 
+  "MDG" = "#2E8B57",
+  "Andre" = "#808080")
+
+ggplot(data, aes(x = date, y = support, color = party)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = party_colors) +
+  labs(title = "Support for Norwegian political parties over time",
+    x = "Date",
+    y = "Support (%)\n",
+    caption = "Source: pollofpolls.no",
+    color = "Party") +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    legend.position = "top",
+    plot.title = element_text(hjust = 0.5, size = 24),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 12))
+```
+
+## Task 7
+
+```{r}
+urls <- html %>%
+  html_element("table") %>%
+  html_elements("a") %>%
+  html_attr("href")
+
+month_links <- grep("\\?cmd=Stortinget&do=snitt&yw=\\d+", urls, value = TRUE)
+```
+
+## Task 8
+
+```{r}
+base_url <- "https://www.pollofpolls.no/"
+complete_urls <- paste0(base_url, month_links)
+
+if(length(complete_urls) > 0) {browseURL(complete_urls[1]) }
+```
+
+## Task 9
+
+```{r, eval = !file.exists("monthly")}
+start_date <- ymd("2024-08-01")
+end_date <- ymd("2008-01-01")
+date_sequence <- seq(start_date, end_date, by = "-1 month")
+
+months <- format(date_sequence, "%B_%Y")
+
+if (!dir.exists("monthly")) { dir.create("monthly") }
+
+download_pages <- function(complete_urls, output_folder, months) {
+  for (i in seq_along(complete_urls)) {
+    output_file <- file.path(output_folder, paste0("month_", months[i], ".html"))
+    if (!file.exists(output_file)) {
+      download.file(complete_urls[i], output_file, quiet = TRUE)
+      Sys.sleep(1)}
+    }
+  }
+
+if (!file.exists(file.path("monthly", "download_complete.txt"))) {
+  download_pages(complete_urls, "monthly", months)
+  file.create(file.path("monthly", "download_complete.txt"))
+  }
+
+```
+
+## Task 10
+
+```{r}
+#| message: false
+#| eval: false
+
+extract_polls_table <- function(file_path) {
+  html <- read_html(file_path)
+  table <- html %>% html_element("table") %>% html_table()
+  table$file_name <- basename(file_path)
+  return(table)
+}
+
+files <- list.files(path = "monthly", pattern = "*.html", full.names = TRUE)
+
+all_polls <- files %>% 
+  lapply(extract_polls_table) %>% 
+  bind_rows()
+
+writexl::write_xlsx(all_polls,"all_polls.xlsx")
+
+```
+
+## Task 11
+
+```{r}
+all_polls <- read_excel("all_polls.xlsx")
+
+final_polls <- all_polls %>% 
+  rename_with(~c("poll","Ap","Høyre","Frp","SV","Sp",
+                 "KrF","Venstre","MDG","Rødt","Andre","month")) %>%
+  mutate(month_year = str_remove_all(month, "month_|\\.html"),
+    yearmon = as.yearmon(month_year, "%B_%Y")) %>%
+  select(-month, -month_year)
+
+avarage_polls <- final_polls %>%
+  filter((str_detect(poll, "Gjennomsnitt|Feilmargin"))) %>% 
+  pivot_longer(
+    cols = c(2:11),
+    names_to = c("party"),
+    values_to = "value") %>% 
+  pivot_wider(names_from = poll,
+              values_from = value) %>% 
+  rename(error = Feilmargin,
+         avarage = Gjennomsnitt)
+
+final_polls <- final_polls %>% 
+  filter(!(str_detect(poll, "Gjennomsnitt|Feilmargin"))) %>% 
+    pivot_longer(
+    cols = c(2:11),
+    names_to = c("party"),
+    values_to = "value") %>% 
+  left_join(avarage_polls, by = c("party", "yearmon")) %>% 
+  separate(value, into = c("support", "seats"),
+           sep = " \\(", convert = TRUE) %>%
+  separate(avarage, into = c("support_avarage", "seats_avarage"),
+           sep = " \\(", convert = TRUE) %>% 
+  mutate(support = as.numeric(gsub(",", ".", support)),
+         support_avarage = as.numeric(gsub(",", ".", support_avarage)),
+         error = gsub("±", "", error),
+         error = as.numeric(gsub(",", ".", error)),) %>%
+  select(-c(seats, seats_avarage))
+```
+
+## Task 12
+
+```{r}
+#| fig-width: 12
+#| fig-height: 10 
+#| label: fig-labor
+#| fig-cap: "Figure: Trends in support for the Labor Party in Norway."
+
+labor_polls <- final_polls %>% 
+  filter(party == "Ap")
+
+ggplot(labor_polls, aes(x = yearmon)) +
+  geom_point(aes(y = support), color = "#FF0000", alpha = 0.3) + 
+  geom_line(aes(y = support_avarage), color = "#FF0000", size = 1.2) +
+  geom_ribbon(aes(ymin = support_avarage - error, ymax = support_avarage + error),
+              fill = "#FF0000", alpha = 0.2) +
+  labs(title = "Labor Party Support Over Time",
+       x = "Month-Year",
+       y = "Percentage Support",
+       caption = "Source: Your Data Source") +
+  theme_minimal() + 
+  theme(plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 14),
+        axis.text = element_text(size = 12),
+        plot.caption = element_text(size = 10, hjust = 1))
+```
